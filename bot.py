@@ -542,10 +542,17 @@ async def view_application(interaction: discord.Interaction, discord_id: str):
         await interaction.followup.send(chunk, ephemeral=True)
 
 
-def _is_staff(member: discord.Member) -> bool:
+def _is_staff(member) -> bool:
     """Returns True if the member is UMBRA or has a staff role."""
-    if str(member.id) == Config.UMBRA_DISCORD_ID:
+    # Handle case where member might be a User (in DMs) instead of a Member
+    user_id = str(member.id)
+    if user_id == Config.UMBRA_DISCORD_ID:
         return True
+    
+    # If it's a DM, they can't have server roles, so only UMBRA passes
+    if not hasattr(member, 'roles'):
+        return False
+        
     staff_roles = {Config.ROLE_DARK_COUNCIL, Config.ROLE_HARBINGERS}
     return any(r.name in staff_roles for r in member.roles)
 
