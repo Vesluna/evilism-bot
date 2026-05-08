@@ -381,7 +381,7 @@ async def toggle_builders(interaction: discord.Interaction, enabled: bool):
 
 @bot.tree.command(name="approve", description="[TDC/Staff] Approve a pending verification application.")
 async def approve_application(interaction: discord.Interaction, discord_id: str):
-    if not _is_staff(interaction.member):
+if not _is_staff(interaction.user):
         await interaction.response.send_message("❌ You do not have permission to approve applications.", ephemeral=True)
         return
 
@@ -436,7 +436,7 @@ async def approve_application(interaction: discord.Interaction, discord_id: str)
 
 @bot.tree.command(name="deny", description="[TDC/Staff] Deny a pending verification application.")
 async def deny_application(interaction: discord.Interaction, discord_id: str, reason: str = "No reason provided."):
-    if not _is_staff(interaction.member):
+if not _is_staff(interaction.user):
         await interaction.response.send_message("❌ You do not have permission to deny applications.", ephemeral=True)
         return
 
@@ -474,7 +474,7 @@ async def deny_application(interaction: discord.Interaction, discord_id: str, re
 
 @bot.tree.command(name="pending", description="[TDC/Staff] List all pending verification applications.")
 async def list_pending(interaction: discord.Interaction):
-    if not _is_staff(interaction.member):
+if not _is_staff(interaction.user):
         await interaction.response.send_message("❌ You do not have permission to view pending applications.", ephemeral=True)
         return
 
@@ -495,7 +495,7 @@ async def list_pending(interaction: discord.Interaction):
 
 @bot.tree.command(name="viewapp", description="[TDC/Staff] View the full application for a user.")
 async def view_application(interaction: discord.Interaction, discord_id: str):
-    if not _is_staff(interaction.member):
+if not _is_staff(interaction.user):
         await interaction.response.send_message("❌ You do not have permission to view applications.", ephemeral=True)
         return
 
