@@ -27,7 +27,13 @@ from database import Database
 
 log = logging.getLogger("evilism.backend")
 app = Flask(__name__)
-CORS(app, origins=[Config.GITHUB_PAGES_URL, "http://localhost:*"])
+# Extract the base origin (scheme + host) for CORS
+from urllib.parse import urlparse
+parsed_url = urlparse(Config.GITHUB_PAGES_URL)
+base_origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
+
+CORS(app, origins=[base_origin, "http://localhost:*", "https://*.github.io"] )
+
 
 db = Database()
 
