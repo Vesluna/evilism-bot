@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 parsed_url = urlparse(Config.GITHUB_PAGES_URL)
 base_origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
 
-CORS(app, origins=[base_origin, "http://localhost:*", "https://*.github.io"] )
+CORS(app, origins=["https://vesluna.github.io", "http://localhost:8080", "http://localhost:3000"] )
 
 
 db = Database()
