@@ -58,5 +58,5 @@ class Config:
     BACKEND_PORT: int = int(os.getenv("PORT", 8080))
 
     # ── Database ───────────────────────────────────────────────
-    # SQLite database file path (relative to bot directory)
-    DATABASE_PATH: str = os.getenv("DATABASE_PATH", "evilism.db")
+    # This ensures both bot and backend look at the EXACT same file
+    DATABASE_PATH: str = os.path.join(os.path.dirname(__file__), "evilism.db")
