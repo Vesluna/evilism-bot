@@ -39,9 +39,26 @@ db  = Database()
 @bot.event
 async def on_ready():
     log.info(f"EVILISM bot online as {bot.user} (ID: {bot.user.id})")
-    await bot.tree.sync()
-    check_expiries.start()
-    log.info("Slash commands synced. Expiry checker started.")
+    # Sync globally
+    try:
+        synced = await bot.tree.sync()
+        log.info(f"Synced {len(synced)} slash commands globally.")
+    except Exception as e:
+        log.error(f"Failed to sync slash commands: {e}")
+    
+    if not check_expiries.is_running():
+        check_expiries.start()
+    log.info("Expiry checker started.")
+
+@bot.command()
+@commands.is_owner()
+async def sync(ctx):
+    """Manual sync command for the bot owner."""
+    try:
+        synced = await bot.tree.sync()
+        await ctx.send(f"Successfully synced {len(synced)} commands.")
+    except Exception as e:
+        await ctx.send(f"Failed to sync: {e}")
 
 
 # ════════════════════════════════════════════════════════════
