@@ -40,8 +40,8 @@ def run_bot():
         await bot.wait_until_ready()
         q = get_security_queue()
         while not bot.is_closed():
-            try:
-                item = q.get_nowait()
+            while not q.empty():
+                item = q.get()
                 for guild in bot.guilds:
                     channel = discord.utils.get(guild.text_channels, name=Config.CHANNEL_SECURITY_LOGS)
                     if channel:
@@ -54,16 +54,18 @@ def run_bot():
                         )
                         try:
                             await channel.send(msg)
-                        except discord.Forbidden:
-                            log.warning("Cannot post to #security-logs")
-            except Exception:
-                pass
-            await asyncio.sleep(2)
+                        except:
+                            pass
+            await asyncio.sleep(5)
 
-    bot.loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(bot.loop)
-    bot.loop.create_task(drain_security_queue())
-    bot.run(Config.BOT_TOKEN)
+    # Use the default loop instead of creating a new one
+    async def main():
+        async with bot:
+            bot.loop.create_task(drain_security_queue())
+            await bot.start(Config.BOT_TOKEN)
+
+    asyncio.run(main())
+
 
 
 if __name__ == "__main__":
