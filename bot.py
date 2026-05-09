@@ -526,6 +526,27 @@ async def lock_forms(interaction: discord.Interaction, locked: bool, reason: str
     await interaction.response.send_message(f"🔒 Application forms are now **{status}**. Reason: {reason}", ephemeral=True)
     await _log_security_event(interaction.guild, f"🔒 **Forms {status}** — Application forms {status.lower()} by {interaction.user.mention}. Reason: {reason}")
 
+@bot.tree.command(name="records", description="[Staff] View the secret records for a user.")
+async def view_records(interaction: discord.Interaction, user: discord.User):
+    if not _is_staff(interaction.user):
+        await interaction.response.send_message("❌ You do not have permission to view secret records.", ephemeral=True)
+        return
+    
+    records = db.get_secret_records(str(user.id))
+    if not records:
+        await interaction.response.send_message(f"📂 No secret records found for **{user}**.", ephemeral=True)
+        return
+    
+    lines = [f"📂 **Secret Records for {user}** (`{user.id}`):\n"]
+    for r in records:
+        lines.append(f"• `[{r['recorded_at']}]` **{r['event_type'].upper()}**: {r['content']} (By: <@{r['recorded_by']}>)")
+    
+    full_text = "\n".join(lines)
+    chunks = [full_text[i:i+1900] for i in range(0, len(full_text), 1900)]
+    await interaction.response.send_message(chunks[0], ephemeral=True)
+    for chunk in chunks[1:]:
+        await interaction.followup.send(chunk, ephemeral=True)
+
 
 @bot.tree.command(name="pending", description="[TDC/Staff] List all pending verification applications.")
 async def list_pending(interaction: discord.Interaction):

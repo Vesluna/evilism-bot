@@ -84,6 +84,15 @@ class Database:
                     banned_by       TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS secret_records (
+                    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                    discord_id      TEXT NOT NULL,
+                    event_type      TEXT NOT NULL, -- 'ban', 'kick', 'warn', 'note'
+                    content         TEXT NOT NULL,
+                    recorded_at     TEXT NOT NULL,
+                    recorded_by     TEXT NOT NULL
+                );
+
                 -- Default settings
                 INSERT OR IGNORE INTO settings (key, value) VALUES ('builders_club_enabled', '0');
                 INSERT OR IGNORE INTO settings (key, value) VALUES ('forms_locked', '0');
@@ -143,10 +152,27 @@ class Database:
                 "INSERT OR REPLACE INTO bans (discord_id, reason, banned_at, banned_by) VALUES (?, ?, ?, ?)",
                 (discord_id, reason, _iso(_utcnow()), banned_by)
             )
+            # Add to Secret Records
+            self.add_secret_record(discord_id, "ban", f"Banned for: {reason}", banned_by)
 
     def unban_user(self, discord_id: str):
         with self._connect() as conn:
             conn.execute("DELETE FROM bans WHERE discord_id = ?", (discord_id,))
+
+    def add_secret_record(self, discord_id: str, event_type: str, content: str, recorded_by: str):
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT INTO secret_records (discord_id, event_type, content, recorded_at, recorded_by) VALUES (?, ?, ?, ?, ?)",
+                (discord_id, event_type, content, _iso(_utcnow()), recorded_by)
+            )
+
+    def get_secret_records(self, discord_id: str) -> List[Dict[str, Any]]:
+        with self._connect() as conn:
+            rows = conn.execute(
+                "SELECT * FROM secret_records WHERE discord_id = ? ORDER BY recorded_at DESC",
+                (discord_id,)
+            ).fetchall()
+            return [dict(r) for r in rows]
 
     def is_banned(self, discord_id: str) -> bool:
         with self._connect() as conn:
@@ -199,7 +225,11 @@ class Database:
             return False, "You already have a pending application. Please wait for review or for it to expire (7 days)."
         
         if status == "approved":
-            return False, "You have already been accepted. If you were removed, please contact staff."
+            # The requirement is: "if the user leaves the server, and rejoin and needs to verify they are able to submit an application."
+            # We will handle the check of whether they are CURRENTLY in the server with a specific role in the bot logic,
+            # but here in the database, we can allow re-application if they are approved but the bot explicitly requests a re-verify.
+            # To simplify, we'll allow re-application for 'approved' users as long as they aren't banned/locked.
+            return True, ""
 
         # Check for 7-day cooldown on denied or expired applications
         # The requirement says: "if denied they may resubmit a new request in 7 days"
