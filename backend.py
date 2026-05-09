@@ -32,7 +32,7 @@ from urllib.parse import urlparse
 parsed_url = urlparse(Config.GITHUB_PAGES_URL)
 base_origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
 
-CORS(app, origins=["https://vesluna.github.io", "http://localhost:8080", "http://localhost:3000"] )
+CORS(app, origins=["https://vesluna.github.io", "http://localhost:8080", "http://localhost:3000", "http://localhost:5173"] )
 
 
 db = Database()
@@ -190,6 +190,113 @@ def api_check_eligibility():
 
 
 # ════════════════════════════════════════════════════════════
+#  EVILISM HUB ENDPOINTS
+#  These endpoints serve the GitHub Pages hub site
+# ════════════════════════════════════════════════════════════
+
+EVILISM_ROLE_HIERARCHY = {
+    "umbra": 5,
+    "TDC: Heads": 4,
+    "The Dark Council": 3,
+    "Sinister Sorcerers": 2,
+    "Acolytes of Evil": 1,
+    "The Uninitiated": 0,
+}
+
+
+@app.route("/api/hub/me")
+@require_auth
+def hub_get_me():
+    """Returns authenticated user info for the HUB with role tier."""
+    s = request.session
+    
+    # For now, return basic user info
+    # In a full implementation, this would fetch Discord roles from the guild
+    return jsonify({
+        "id": s["discord_id"],
+        "username": s["discord_username"],
+        "avatar": s.get("discord_avatar"),
+        "role": "Acolytes of Evil",  # Default role for new members
+        "tier": EVILISM_ROLE_HIERARCHY.get("Acolytes of Evil", 0),
+    })
+
+
+@app.route("/api/hub/auth/callback")
+def hub_oauth_callback():
+    """OAuth callback for EVILISM HUB (GitHub Pages).
+    Redirects to GitHub Pages with session token.
+    """
+    code  = request.args.get("code")
+    state = request.args.get("state")
+
+    if not code:
+        return redirect(f"{Config.GITHUB_PAGES_URL}?error=no_code")
+
+    # Exchange code for access token
+    token_res = requests.post(
+        "https://discord.com/api/oauth2/token",
+        data={
+            "client_id":     Config.DISCORD_CLIENT_ID,
+            "client_secret": Config.DISCORD_CLIENT_SECRET,
+            "grant_type":    "authorization_code",
+            "code":          code,
+            "redirect_uri":  f"{Config.BACKEND_URL}/api/hub/auth/callback",
+        },
+        headers={"Content-Type": "application/x-www-form-urlencoded"},
+        timeout=10,
+    )
+
+    if not token_res.ok:
+        log.error(f"HUB OAuth token exchange failed: {token_res.text}")
+        return redirect(f"{Config.GITHUB_PAGES_URL}?error=token_exchange_failed")
+
+    token_data   = token_res.json()
+    access_token = token_data.get("access_token")
+
+    if not access_token:
+        return redirect(f"{Config.GITHUB_PAGES_URL}?error=no_access_token")
+
+    # Fetch Discord user identity
+    user_res = requests.get(
+        "https://discord.com/api/v10/users/@me",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+
+    if not user_res.ok:
+        log.error(f"HUB Discord user fetch failed: {user_res.text}")
+        return redirect(f"{Config.GITHUB_PAGES_URL}?error=user_fetch_failed")
+
+    user = user_res.json()
+    discord_id       = user.get("id")
+    discord_username = user.get("global_name") or user.get("username", "Unknown")
+    discord_avatar   = user.get("avatar")
+
+    # Check guild membership (EVILISM server: 1502137521491153037)
+    guilds_res = requests.get(
+        "https://discord.com/api/v10/users/@me/guilds",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    
+    if guilds_res.ok:
+        guilds = guilds_res.json()
+        target_guild_id = "1502137521491153037"
+        is_member = any(g.get("id") == target_guild_id for g in guilds)
+        if not is_member:
+            return redirect(f"{Config.GITHUB_PAGES_URL}?error=not_in_guild")
+    else:
+        log.warning(f"HUB guild check failed: {guilds_res.text}")
+        return redirect(f"{Config.GITHUB_PAGES_URL}?error=guild_check_failed")
+
+    # Create session
+    session_token = db.create_session(discord_id, discord_username, discord_avatar)
+
+    log.info(f"HUB OAuth success for {discord_username} ({discord_id})")
+    return redirect(f"{Config.GITHUB_PAGES_URL}?token={session_token}")
+
+
+# ════════════════════════════════════════════════════════════
 #  POST /api/submit — receives the completed form
 # ════════════════════════════════════════════════════════════
 
@@ -267,9 +374,18 @@ def get_security_queue() -> queue.Queue:
 #  HEALTH CHECK
 # ════════════════════════════════════════════════════════════
 
+# ════════════════════════════════════════════════════════════
+#  HEALTH CHECK
+# ════════════════════════════════════════════════════════════
+
 @app.route("/health")
 def health():
     return jsonify({"status": "ok", "service": "EVILISM Verification Backend"}), 200
+
+
+@app.route("/api/hub/health")
+def hub_health():
+    return jsonify({"status": "ok", "service": "EVILISM HUB Backend"}), 200
 
 
 # ════════════════════════════════════════════════════════════
