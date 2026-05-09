@@ -115,11 +115,34 @@ def oauth_callback():
 
     # Check if this user is eligible to apply
     can, reason = db.can_apply(discord_id)
+    
     if not can:
-        # We redirect with an error message in the URL
         import urllib.parse
+        if reason == "BANNED":
+            return redirect(f"{Config.GITHUB_PAGES_URL}?banned=1")
+        if reason == "LOCKED":
+            lock_reason = db.get_forms_lock_reason()
+            encoded_lock_reason = urllib.parse.quote(lock_reason)
+            return redirect(f"{Config.GITHUB_PAGES_URL}?locked=1&reason={encoded_lock_reason}")
+        
         encoded_reason = urllib.parse.quote(reason)
         return redirect(f"{Config.GITHUB_PAGES_URL}?error_msg={encoded_reason}")
+
+    # Membership Check (Server ID: 1502137521491153037)
+    # Note: This requires the bot to be in the server and the backend to have access to the bot's state
+    # or to make a separate API call to Discord using the user's access token.
+    # Since we have the access_token, we can check guilds.
+    guilds_res = requests.get(
+        "https://discord.com/api/v10/users/@me/guilds",
+        headers={"Authorization": f"Bearer {access_token}"},
+        timeout=10,
+    )
+    if guilds_res.ok:
+        guilds = guilds_res.json()
+        target_guild_id = "1502137521491153037"
+        is_member = any(g.get("id") == target_guild_id for g in guilds)
+        if not is_member:
+            return redirect(f"{Config.GITHUB_PAGES_URL}?not_in_server=1")
 
     # Create session
     session_token = db.create_session(discord_id, discord_username, discord_avatar)

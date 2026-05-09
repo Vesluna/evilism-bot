@@ -108,11 +108,15 @@ class Database:
             ).fetchone()
             return row and row["value"] == "1"
 
-    def set_forms_locked(self, locked: bool):
+    def set_forms_locked(self, locked: bool, reason: str = "Users cannot submit join requests at this time."):
         with self._connect() as conn:
             conn.execute(
                 "INSERT OR REPLACE INTO settings (key, value) VALUES ('forms_locked', ?)",
                 ("1" if locked else "0",)
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('forms_lock_reason', ?)",
+                (reason,)
             )
 
     def is_forms_locked(self) -> bool:
@@ -120,7 +124,14 @@ class Database:
             row = conn.execute(
                 "SELECT value FROM settings WHERE key = 'forms_locked'"
             ).fetchone()
-            return row and row["value"] == "1"
+            return bool(row and row["value"] == "1")
+
+    def get_forms_lock_reason(self) -> str:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'forms_lock_reason'"
+            ).fetchone()
+            return row["value"] if row else "Users cannot submit join requests at this time."
 
     # ══════════════════════════════════════════════════════════
     #  BANS
@@ -141,6 +152,11 @@ class Database:
         with self._connect() as conn:
             row = conn.execute("SELECT discord_id FROM bans WHERE discord_id = ?", (discord_id,)).fetchone()
             return row is not None
+
+    def get_ban_info(self, discord_id: str) -> Optional[Dict[str, Any]]:
+        with self._connect() as conn:
+            row = conn.execute("SELECT * FROM bans WHERE discord_id = ?", (discord_id,)).fetchone()
+            return dict(row) if row else None
 
     # ══════════════════════════════════════════════════════════
     #  APPLICATIONS
@@ -168,10 +184,10 @@ class Database:
         Returns (bool, reason_message).
         """
         if self.is_banned(discord_id):
-            return False, "You are banned from submitting applications."
+            return False, "BANNED"
         
         if self.is_forms_locked():
-            return False, "Users cannot submit join requests at this time."
+            return False, "LOCKED"
 
         last_app = self.get_application(discord_id)
         if not last_app:

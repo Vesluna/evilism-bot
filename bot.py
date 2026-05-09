@@ -471,36 +471,60 @@ async def deny_application(interaction: discord.Interaction, discord_id: str, re
     )
     log.info(f"Application denied for {discord_id} by {interaction.user}: {reason}")
 
-@bot.tree.command(name="ban", description="[Staff] Ban a user from submitting applications.")
+@bot.tree.command(name="ban", description="[Staff] Ban a user from the server and application system.")
 async def ban_user(interaction: discord.Interaction, user: discord.User, reason: str = "No reason provided."):
     if not _is_staff(interaction.user):
         await interaction.response.send_message("❌ You do not have permission to ban users.", ephemeral=True)
         return
     
+    # 1. Ban in Database
     db.ban_user(str(user.id), reason, str(interaction.user.id))
-    await interaction.response.send_message(f"🔨 **{user}** has been banned from submitting applications. Reason: {reason}", ephemeral=True)
-    await _log_security_event(interaction.guild, f"🔨 **User Banned** — {user.mention} banned from applications by {interaction.user.mention}. Reason: {reason}")
+    
+    # 2. Ban in Discord Server
+    try:
+        await interaction.guild.ban(user, reason=f"EVILISM Ban by {interaction.user}: {reason}")
+        discord_status = "and from the Discord server"
+    except discord.Forbidden:
+        discord_status = "but I lack permissions to ban them from the Discord server"
+    except Exception as e:
+        discord_status = f"but Discord ban failed: {e}"
 
-@bot.tree.command(name="unban", description="[Staff] Unban a user from submitting applications.")
+    await interaction.response.send_message(f"🔨 **{user}** has been banned from submitting applications {discord_status}. Reason: {reason}", ephemeral=True)
+    await _log_security_event(interaction.guild, f"🔨 **User Banned** — {user.mention} banned from applications/server by {interaction.user.mention}. Reason: {reason}")
+
+@bot.tree.command(name="unban", description="[Staff] Unban a user from the server and application system.")
 async def unban_user(interaction: discord.Interaction, user: discord.User):
     if not _is_staff(interaction.user):
         await interaction.response.send_message("❌ You do not have permission to unban users.", ephemeral=True)
         return
     
+    # 1. Unban in Database
     db.unban_user(str(user.id))
-    await interaction.response.send_message(f"🔓 **{user}** has been unbanned.", ephemeral=True)
+    
+    # 2. Unban in Discord Server
+    try:
+        await interaction.guild.unban(user, reason=f"EVILISM Unban by {interaction.user}")
+        discord_status = "and from the Discord server"
+    except discord.NotFound:
+        discord_status = "but they were not found in the Discord ban list"
+    except discord.Forbidden:
+        discord_status = "but I lack permissions to unban them from the Discord server"
+    except Exception as e:
+        discord_status = f"but Discord unban failed: {e}"
+
+    await interaction.response.send_message(f"🔓 **{user}** has been unbanned from applications {discord_status}.", ephemeral=True)
     await _log_security_event(interaction.guild, f"🔓 **User Unbanned** — {user.mention} unbanned by {interaction.user.mention}.")
 
 @bot.tree.command(name="lockforms", description="[Staff] Lock or unlock the application form.")
-async def lock_forms(interaction: discord.Interaction, locked: bool):
+async def lock_forms(interaction: discord.Interaction, locked: bool, reason: str = "Users cannot submit join requests at this time."):
     if not _is_staff(interaction.user):
         await interaction.response.send_message("❌ You do not have permission to lock forms.", ephemeral=True)
         return
     
-    db.set_forms_locked(locked)
+    db.set_forms_locked(locked, reason)
     status = "LOCKED" if locked else "UNLOCKED"
-    await interaction.response.send_message(f"🔒 Application forms are now **{status}**.", ephemeral=True)
-    await _log_security_event(interaction.guild, f"🔒 **Forms {status}** — Application forms {status.lower()} by {interaction.user.mention}.")
+    await interaction.response.send_message(f"🔒 Application forms are now **{status}**. Reason: {reason}", ephemeral=True)
+    await _log_security_event(interaction.guild, f"🔒 **Forms {status}** — Application forms {status.lower()} by {interaction.user.mention}. Reason: {reason}")
 
 
 @bot.tree.command(name="pending", description="[TDC/Staff] List all pending verification applications.")
