@@ -39,12 +39,14 @@ class Config:
 
     # ── Role Names ─────────────────────────────────────────────
     # These must match EXACTLY the role names in your Discord server
-    ROLE_UNINITIATED:     str = "The Uninitiated"
-    ROLE_ACOLYTE:         str = "Acolytes of Evil"
-    ROLE_BUILDERS_CLUB:   str = "Umbra's BuildersClub"
-    ROLE_SACRIFICIAL_LAMBS: str = "Sacrificial Lambs"
+    ROLE_UMBRA:           str = "umbra"
+    ROLE_TDC_HEADS:       str = "TDC: Heads"
     ROLE_DARK_COUNCIL:    str = "The Dark Council"
-    ROLE_HARBINGERS:      str = "Harbingers of Chaos"
+    ROLE_BUILDERS_CLUB:   str = "Umbra's BuildersClub"
+    ROLE_SINISTER_SORCERERS: str = "Sinister Sorcerers"
+    ROLE_ACOLYTE:         str = "Acolytes of Evil"
+    ROLE_UNINITIATED:     str = "The Uninitiated"
+    ROLE_SACRIFICIAL_LAMBS: str = "Sacrificial Lambs"
 
     # ── Expiry Durations ───────────────────────────────────────
     # How long (in seconds) a submitted form stays valid before auto-denial

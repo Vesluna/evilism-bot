@@ -47,7 +47,7 @@ class Database:
             conn.executescript("""
                 CREATE TABLE IF NOT EXISTS applications (
                     id                      INTEGER PRIMARY KEY AUTOINCREMENT,
-                    discord_id              TEXT NOT NULL UNIQUE,
+                    discord_id              TEXT NOT NULL,
                     discord_username        TEXT NOT NULL,
                     discord_avatar          TEXT,
                     answers                 TEXT NOT NULL,  -- JSON string
@@ -77,8 +77,16 @@ class Database:
                     value   TEXT NOT NULL
                 );
 
+                CREATE TABLE IF NOT EXISTS bans (
+                    discord_id      TEXT PRIMARY KEY,
+                    reason          TEXT,
+                    banned_at       TEXT NOT NULL,
+                    banned_by       TEXT NOT NULL
+                );
+
                 -- Default settings
                 INSERT OR IGNORE INTO settings (key, value) VALUES ('builders_club_enabled', '0');
+                INSERT OR IGNORE INTO settings (key, value) VALUES ('forms_locked', '0');
             """)
         log.info("Database initialised.")
 
@@ -100,6 +108,40 @@ class Database:
             ).fetchone()
             return row and row["value"] == "1"
 
+    def set_forms_locked(self, locked: bool):
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO settings (key, value) VALUES ('forms_locked', ?)",
+                ("1" if locked else "0",)
+            )
+
+    def is_forms_locked(self) -> bool:
+        with self._connect() as conn:
+            row = conn.execute(
+                "SELECT value FROM settings WHERE key = 'forms_locked'"
+            ).fetchone()
+            return row and row["value"] == "1"
+
+    # ══════════════════════════════════════════════════════════
+    #  BANS
+    # ══════════════════════════════════════════════════════════
+
+    def ban_user(self, discord_id: str, reason: str, banned_by: str):
+        with self._connect() as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO bans (discord_id, reason, banned_at, banned_by) VALUES (?, ?, ?, ?)",
+                (discord_id, reason, _iso(_utcnow()), banned_by)
+            )
+
+    def unban_user(self, discord_id: str):
+        with self._connect() as conn:
+            conn.execute("DELETE FROM bans WHERE discord_id = ?", (discord_id,))
+
+    def is_banned(self, discord_id: str) -> bool:
+        with self._connect() as conn:
+            row = conn.execute("SELECT discord_id FROM bans WHERE discord_id = ?", (discord_id,)).fetchone()
+            return row is not None
+
     # ══════════════════════════════════════════════════════════
     #  APPLICATIONS
     # ══════════════════════════════════════════════════════════
@@ -120,45 +162,85 @@ class Database:
             ).fetchone()
             return row is not None
 
+    def can_apply(self, discord_id: str) -> tuple[bool, str]:
+        """
+        Checks if a user is eligible to submit a new application.
+        Returns (bool, reason_message).
+        """
+        if self.is_banned(discord_id):
+            return False, "You are banned from submitting applications."
+        
+        if self.is_forms_locked():
+            return False, "Users cannot submit join requests at this time."
+
+        last_app = self.get_application(discord_id)
+        if not last_app:
+            return True, ""
+
+        status = last_app["status"]
+        
+        if status == "pending":
+            return False, "You already have a pending application. Please wait for review or for it to expire (7 days)."
+        
+        if status == "approved":
+            return False, "You have already been accepted. If you were removed, please contact staff."
+
+        # Check for 7-day cooldown on denied or expired applications
+        # The requirement says: "if denied they may resubmit a new request in 7 days"
+        # and "if it hasnt been denied or accepted within 7 days, as this is when that application has expired"
+        # This implies we check the last event time (reviewed_at or submitted_at/expires_at)
+        
+        last_event_str = last_app["reviewed_at"] or last_app["submitted_at"]
+        last_event = _from_iso(last_event_str)
+        cooldown_end = last_event + timedelta(seconds=Config.FORM_EXPIRY_SECONDS)
+        
+        if _utcnow() < cooldown_end:
+            remaining = cooldown_end - _utcnow()
+            days = remaining.days
+            hours = remaining.seconds // 3600
+            return False, f"You must wait {days}d {hours}h before submitting a new application."
+
+        return True, ""
+
     def create_application(
         self,
         discord_id: str,
         discord_username: str,
         discord_avatar: Optional[str],
         answers: Dict[str, str],
-    ) -> bool:
+    ) -> tuple[bool, str]:
         """
-        Creates a new application. Returns False if one already exists (pending).
+        Creates a new application. Returns (success, error_message).
         """
+        can, reason = self.can_apply(discord_id)
+        if not can:
+            return False, reason
+
         import json
         now        = _utcnow()
         expires_at = now + timedelta(seconds=Config.FORM_EXPIRY_SECONDS)
         builders   = 1 if self.is_builders_club_enabled() else 0
 
-        try:
-            with self._connect() as conn:
-                conn.execute(
-                    """
-                    INSERT INTO applications
-                        (discord_id, discord_username, discord_avatar, answers,
-                         builders_club_at_submission, status, submitted_at, expires_at)
-                    VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
-                    """,
-                    (
-                        discord_id,
-                        discord_username,
-                        discord_avatar,
-                        json.dumps(answers),
-                        builders,
-                        _iso(now),
-                        _iso(expires_at),
-                    )
+        with self._connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO applications
+                    (discord_id, discord_username, discord_avatar, answers,
+                     builders_club_at_submission, status, submitted_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, 'pending', ?, ?)
+                """,
+                (
+                    discord_id,
+                    discord_username,
+                    discord_avatar,
+                    json.dumps(answers),
+                    builders,
+                    _iso(now),
+                    _iso(expires_at),
                 )
-            log.info(f"Application created for {discord_username} ({discord_id})")
-            return True
-        except sqlite3.IntegrityError:
-            log.warning(f"Duplicate application attempt for {discord_id}")
-            return False
+            )
+        log.info(f"Application created for {discord_username} ({discord_id})")
+        return True, ""
 
     def get_application(self, discord_id: str) -> Optional[Dict[str, Any]]:
         import json
@@ -181,7 +263,7 @@ class Database:
             ).fetchall()
             return [dict(r) for r in rows]
 
-    def approve_application(self, discord_id: str) -> Optional[Dict[str, Any]]:
+    def approve_application(self, discord_id: str, reviewed_by: str) -> Optional[Dict[str, Any]]:
         """
         Approves a pending application, generates a verification key, and returns it.
         Returns None if no pending application exists.
@@ -200,8 +282,8 @@ class Database:
 
         with self._connect() as conn:
             conn.execute(
-                "UPDATE applications SET status = 'approved', reviewed_at = ? WHERE discord_id = ?",
-                (_iso(now), discord_id)
+                "UPDATE applications SET status = 'approved', reviewed_at = ?, reviewed_by = ? WHERE discord_id = ? AND status = 'pending'",
+                (_iso(now), reviewed_by, discord_id)
             )
             conn.execute(
                 """
@@ -218,15 +300,15 @@ class Database:
             "builders_club_at_submission": bool(builders),
         }
 
-    def deny_application(self, discord_id: str) -> Optional[Dict[str, Any]]:
+    def deny_application(self, discord_id: str, reviewed_by: str) -> Optional[Dict[str, Any]]:
         app = self.get_application(discord_id)
         if not app or app["status"] != "pending":
             return None
 
         with self._connect() as conn:
             conn.execute(
-                "UPDATE applications SET status = 'denied', reviewed_at = ? WHERE discord_id = ?",
-                (_iso(_utcnow()), discord_id)
+                "UPDATE applications SET status = 'denied', reviewed_at = ?, reviewed_by = ? WHERE discord_id = ? AND status = 'pending'",
+                (_iso(_utcnow()), reviewed_by, discord_id)
             )
 
         log.info(f"Application denied for {discord_id}.")

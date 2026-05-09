@@ -113,9 +113,13 @@ def oauth_callback():
     discord_username = user.get("global_name") or user.get("username", "Unknown")
     discord_avatar   = user.get("avatar")
 
-    # Check if this user already has a pending application (can't resubmit)
-    if db.has_pending_application(discord_id):
-        return redirect(f"{Config.GITHUB_PAGES_URL}?already_submitted=1")
+    # Check if this user is eligible to apply
+    can, reason = db.can_apply(discord_id)
+    if not can:
+        # We redirect with an error message in the URL
+        import urllib.parse
+        encoded_reason = urllib.parse.quote(reason)
+        return redirect(f"{Config.GITHUB_PAGES_URL}?error_msg={encoded_reason}")
 
     # Create session
     session_token = db.create_session(discord_id, discord_username, discord_avatar)
@@ -146,7 +150,20 @@ def get_me():
 
 @app.route("/api/builders-status")
 def builders_status():
-    return jsonify({"enabled": db.is_builders_club_enabled()})
+    return jsonify({
+        "enabled": db.is_builders_club_enabled(),
+        "forms_locked": db.is_forms_locked()
+    })
+
+@app.route("/api/check-eligibility")
+@require_auth
+def api_check_eligibility():
+    s = request.session
+    can, reason = db.can_apply(s["discord_id"])
+    return jsonify({
+        "can_apply": can,
+        "reason": reason
+    })
 
 
 # ════════════════════════════════════════════════════════════
@@ -160,10 +177,6 @@ def submit_form():
     discord_id       = s["discord_id"]
     discord_username = s["discord_username"]
     discord_avatar   = s.get("discord_avatar")
-
-    # Prevent double submission
-    if db.has_pending_application(discord_id):
-        return jsonify({"error": "Application already submitted."}), 409
 
     body = request.get_json(silent=True)
     if not body:
@@ -183,9 +196,9 @@ def submit_form():
         if len(answers.get(key, "").strip()) < 10:
             return jsonify({"error": f"Answer to {key} is too short."}), 400
 
-    created = db.create_application(discord_id, discord_username, discord_avatar, answers)
+    created, error_message = db.create_application(discord_id, discord_username, discord_avatar, answers)
     if not created:
-        return jsonify({"error": "Application already submitted."}), 409
+        return jsonify({"error": error_message}), 403
 
     # Invalidate session so the form can't be reloaded and resubmitted
     auth = request.headers.get("Authorization", "")

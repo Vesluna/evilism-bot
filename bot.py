@@ -385,7 +385,7 @@ async def approve_application(interaction: discord.Interaction, discord_id: str)
         await interaction.response.send_message("❌ You do not have permission to approve applications.", ephemeral=True)
         return
 
-    result = db.approve_application(discord_id)
+    result = db.approve_application(discord_id, reviewed_by=str(interaction.user.id))
     if not result:
         await interaction.response.send_message(f"❌ No pending application found for user ID `{discord_id}`.", ephemeral=True)
         return
@@ -410,7 +410,7 @@ async def approve_application(interaction: discord.Interaction, discord_id: str)
         f"`#verification-portal` channel in the EVILISM server to complete your initiation.\n\n"
         f"```\n{key}\n```\n"
         f"⚠️ **This key expires in 84 hours (3.5 days).** Do not delay.\n"
-        f"If it expires, you will be placed under restricted access and must reapply.\n\n"
+        f"If it expires, you will be placed under restricted access and must reapply after **7 days**.\n\n"
         f"*Do not share this key with anyone. It is bound to your account.*\n"
         f"— **EVILISM Verification System**"
     )
@@ -440,7 +440,7 @@ async def deny_application(interaction: discord.Interaction, discord_id: str, re
         await interaction.response.send_message("❌ You do not have permission to deny applications.", ephemeral=True)
         return
 
-    result = db.deny_application(discord_id)
+    result = db.deny_application(discord_id, reviewed_by=str(interaction.user.id))
     if not result:
         await interaction.response.send_message(f"❌ No pending application found for user ID `{discord_id}`.", ephemeral=True)
         return
@@ -454,7 +454,7 @@ async def deny_application(interaction: discord.Interaction, discord_id: str, re
                 f"**Your Application Has Been Denied, {member.display_name}.**\n\n"
                 f"After careful review, The Dark Council has decided not to grant you entry at this time.\n\n"
                 f"**Reason:** {reason}\n\n"
-                f"You may submit a new application in the future if you believe you can better "
+                f"You may submit a new application in **7 days** if you still believe you can better "
                 f"demonstrate your dedication to the Cult.\n\n"
                 f"— **EVILISM Verification System**"
             )
@@ -470,6 +470,37 @@ async def deny_application(interaction: discord.Interaction, discord_id: str, re
         f"{interaction.user.mention}. Reason: {reason}"
     )
     log.info(f"Application denied for {discord_id} by {interaction.user}: {reason}")
+
+@bot.tree.command(name="ban", description="[Staff] Ban a user from submitting applications.")
+async def ban_user(interaction: discord.Interaction, user: discord.User, reason: str = "No reason provided."):
+    if not _is_staff(interaction.user):
+        await interaction.response.send_message("❌ You do not have permission to ban users.", ephemeral=True)
+        return
+    
+    db.ban_user(str(user.id), reason, str(interaction.user.id))
+    await interaction.response.send_message(f"🔨 **{user}** has been banned from submitting applications. Reason: {reason}", ephemeral=True)
+    await _log_security_event(interaction.guild, f"🔨 **User Banned** — {user.mention} banned from applications by {interaction.user.mention}. Reason: {reason}")
+
+@bot.tree.command(name="unban", description="[Staff] Unban a user from submitting applications.")
+async def unban_user(interaction: discord.Interaction, user: discord.User):
+    if not _is_staff(interaction.user):
+        await interaction.response.send_message("❌ You do not have permission to unban users.", ephemeral=True)
+        return
+    
+    db.unban_user(str(user.id))
+    await interaction.response.send_message(f"🔓 **{user}** has been unbanned.", ephemeral=True)
+    await _log_security_event(interaction.guild, f"🔓 **User Unbanned** — {user.mention} unbanned by {interaction.user.mention}.")
+
+@bot.tree.command(name="lockforms", description="[Staff] Lock or unlock the application form.")
+async def lock_forms(interaction: discord.Interaction, locked: bool):
+    if not _is_staff(interaction.user):
+        await interaction.response.send_message("❌ You do not have permission to lock forms.", ephemeral=True)
+        return
+    
+    db.set_forms_locked(locked)
+    status = "LOCKED" if locked else "UNLOCKED"
+    await interaction.response.send_message(f"🔒 Application forms are now **{status}**.", ephemeral=True)
+    await _log_security_event(interaction.guild, f"🔒 **Forms {status}** — Application forms {status.lower()} by {interaction.user.mention}.")
 
 
 @bot.tree.command(name="pending", description="[TDC/Staff] List all pending verification applications.")
@@ -543,17 +574,15 @@ async def view_application(interaction: discord.Interaction, discord_id: str):
 
 
 def _is_staff(member) -> bool:
-    """Returns True if the member is UMBRA or has a staff role."""
-    # Handle case where member might be a User (in DMs) instead of a Member
+    """Returns True if the member is UMBRA or has a staff role (TDC: Heads, The Dark Council)."""
     user_id = str(member.id)
     if user_id == Config.UMBRA_DISCORD_ID:
         return True
     
-    # If it's a DM, they can't have server roles, so only UMBRA passes
     if not hasattr(member, 'roles'):
         return False
         
-    staff_roles = {Config.ROLE_DARK_COUNCIL, Config.ROLE_HARBINGERS}
+    staff_roles = {Config.ROLE_TDC_HEADS, Config.ROLE_DARK_COUNCIL}
     return any(r.name in staff_roles for r in member.roles)
 
 
